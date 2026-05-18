@@ -12,9 +12,6 @@ API_TOKEN = '8325851971:AAHQnEfumrJwcz_Ncet34PIBI0XQFP2iFnw'
 OWNER_ID = 8542876714
 bot = telebot.TeleBot(API_TOKEN)
 
-# Use environment variable for port (Railway requirement)
-PORT = int(os.environ.get('PORT', 8080))
-
 user_db = {}
 
 # ============ CORE ENGINE ============
@@ -45,7 +42,7 @@ def mass_mailer_engine(chat_id, target, subject, body, total_limit):
             print(f"Skipping {acc['email']}")
     
     if not working_accounts:
-        bot.send_message(chat_id, "❌ **No working accounts!**\n\nUse App Passwords for Gmail", parse_mode="Markdown")
+        bot.send_message(chat_id, "❌ **No working accounts!**\n\nUse App Passwords:\n1. Google Account → Security\n2. 2-Step Verification ON\n3. App Passwords → Generate\n4. Add as `email:16digitpassword`", parse_mode="Markdown")
         data['running'] = False
         return
     
@@ -277,16 +274,31 @@ def handle_query(call):
         user_db[cid]['accounts'] = []
         bot.answer_callback_query(call.id, "Cleared!")
 
+# ============ SAVE ACC WITH DUPLICATE CHECK ============
 def save_acc(m):
     try:
         e, p = m.text.split(':', 1)
-        user_db[m.chat.id]['accounts'].append({'email': e.strip(), 'pass': p.strip()})
-        if test_account_credentials(e.strip(), p.strip()):
-            bot.send_message(m.chat.id, "✅ Added + Working!")
+        email = e.strip()
+        password = p.strip()
+        
+        # Check if email already exists
+        existing_accounts = user_db[m.chat.id]['accounts']
+        for acc in existing_accounts:
+            if acc['email'].lower() == email.lower():
+                bot.send_message(m.chat.id, "❌ **Already Added!**\nThis email is already in your account list.", parse_mode="Markdown")
+                return
+        
+        # Add new account
+        user_db[m.chat.id]['accounts'].append({'email': email, 'pass': password})
+        
+        if test_account_credentials(email, password):
+            bot.send_message(m.chat.id, "✅ **Added + Working!**", parse_mode="Markdown")
         else:
-            bot.send_message(m.chat.id, "⚠️ Added but NOT working! Use App Password.\n\nHow to get App Password:\n1. Google Account → Security\n2. 2-Step Verification ON\n3. App Passwords → Generate\n4. Use 16-digit code as password")
-    except:
-        bot.send_message(m.chat.id, "❌ Format: `email:password`")
+            bot.send_message(m.chat.id, "⚠️ **Added but NOT working!**\n\nUse App Password:\n1. Google Account → Security\n2. 2-Step Verification ON\n3. App Passwords → Generate\n4. Use 16-digit code as password", parse_mode="Markdown")
+            
+    except Exception as e:
+        bot.send_message(m.chat.id, "❌ **Wrong Format!**\nUse: `email:password`", parse_mode="Markdown")
+        print(f"Save acc error: {e}")
 
 def save_target(m):
     user_db[m.chat.id]['target'] = m.text.strip()
@@ -313,11 +325,8 @@ def final_launch(m):
     except:
         bot.send_message(m.chat.id, "❌ Enter number only!")
 
-# ============ WEBHOOK / POLLING ============
+# ============ START BOT ============
 if __name__ == "__main__":
     print("🤖 Bot Started!")
     print(f"👑 Owner ID: {OWNER_ID}")
-    # Railway requires webhook or polling on a port
-    # Remove webhook and use polling
-    bot.remove_webhook()
-    bot.infinity_polling(skip_pending=True)
+    bot.infinity_polling()

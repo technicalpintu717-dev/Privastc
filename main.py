@@ -6,13 +6,26 @@ import threading
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from database import init_db, save_user_data, load_user_data, load_all_users
 
 # ============ CONFIG ============
 API_TOKEN = '8325851971:AAHQnEfumrJwcz_Ncet34PIBI0XQFP2iFnw'
 OWNER_ID = 8542876714
 bot = telebot.TeleBot(API_TOKEN)
 
+# Initialize database
+init_db()
+
+# Load users from database
 user_db = {}
+for uid in load_all_users():
+    data = load_user_data(uid)
+    if data:
+        user_db[uid] = data
+
+def save_user(chat_id):
+    if chat_id in user_db:
+        save_user_data(chat_id, user_db[chat_id])
 
 # ============ CORE ENGINE ============
 def test_account_credentials(email, password):
@@ -44,6 +57,7 @@ def mass_mailer_engine(chat_id, target, subject, body, total_limit):
     if not working_accounts:
         bot.send_message(chat_id, "❌ **No working accounts!**\n\nUse App Passwords:\n1. Google Account → Security\n2. 2-Step Verification ON\n3. App Passwords → Generate\n4. Add as `email:16digitpassword`", parse_mode="Markdown")
         data['running'] = False
+        save_user(chat_id)
         return
     
     bot.send_message(chat_id, f"🚀 **MAIL START**\n🎯 Target: `{target}`\n🔢 Limit: `{total_limit}`\n📧 Accounts: `{len(working_accounts)}`", parse_mode="Markdown")
@@ -92,6 +106,7 @@ def mass_mailer_engine(chat_id, target, subject, body, total_limit):
             bot.send_message(chat_id, f"📊 Progress: `{sent}/{total_limit}` sent", parse_mode="Markdown")
     
     data['running'] = False
+    save_user(chat_id)
     bot.send_message(chat_id, f"🏁 **FINISH**\n✅ Sent: `{sent}`\n❌ Failed: `{failed}`")
 
 # ============ BROADCAST FUNCTIONS ============
@@ -155,11 +170,12 @@ def welcome(message):
     cid = message.chat.id
     if cid not in user_db:
         user_db[cid] = {'accounts': [], 'target': None, 'running': False, 'subj': 'Alert', 'body': 'Sample'}
+        save_user(cid)
     
     if cid == OWNER_ID:
-        bot.send_message(cid, "**ALPHA MASS MAILER**\nStatus: Online 🟢", parse_mode="Markdown", reply_markup=get_owner_menu())
+        bot.send_message(cid, "**ALPHA MASS MAILER**\nStatus: Online 🟢\n💾 SQLite Active", parse_mode="Markdown", reply_markup=get_owner_menu())
     else:
-        bot.send_message(cid, "ALPHA MASS MAILER\nStatus: Online 🟢", reply_markup=get_main_menu())
+        bot.send_message(cid, "ALPHA MASS MAILER\nStatus: Online 🟢\n💾 SQLite Active", reply_markup=get_main_menu())
 
 # ============ BROADCAST HANDLERS ============
 @bot.callback_query_handler(func=lambda call: call.data == "broadcast_menu")
@@ -240,9 +256,9 @@ def execute_broadcast_photo(message, photo_id):
 @bot.callback_query_handler(func=lambda call: call.data == "back_main")
 def back_to_main(call):
     if call.message.chat.id == OWNER_ID:
-        bot.edit_message_text("**ALPHA MOD**\nOnline 🟢", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=get_owner_menu())
+        bot.edit_message_text("**ALPHA MOD**\nOnline 🟢\n💾 SQLite", call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=get_owner_menu())
     else:
-        bot.edit_message_text("ALPHA DASHBOARD\nOnline 🟢", call.message.chat.id, call.message.message_id, reply_markup=get_main_menu())
+        bot.edit_message_text("ALPHA DASHBOARD\nOnline 🟢\n💾 SQLite", call.message.chat.id, call.message.message_id, reply_markup=get_main_menu())
 
 # ============ MAIN HANDLERS ============
 @bot.callback_query_handler(func=lambda call: True)
@@ -266,12 +282,14 @@ def handle_query(call):
         bot.register_next_step_handler(msg, final_launch)
     elif call.data == "stop_bomb":
         user_db[cid]['running'] = False
+        save_user(cid)
         bot.answer_callback_query(call.id, "Stopping...")
     elif call.data == "status":
         d = user_db[cid]
         bot.send_message(cid, f"👤 Accounts: {len(d['accounts'])}\n🎯 Target: {d['target']}")
     elif call.data == "clear":
         user_db[cid]['accounts'] = []
+        save_user(cid)
         bot.answer_callback_query(call.id, "Cleared!")
 
 # ============ SAVE ACC WITH DUPLICATE CHECK ============
@@ -281,15 +299,14 @@ def save_acc(m):
         email = e.strip()
         password = p.strip()
         
-        # Check if email already exists
         existing_accounts = user_db[m.chat.id]['accounts']
         for acc in existing_accounts:
             if acc['email'].lower() == email.lower():
                 bot.send_message(m.chat.id, "❌ **Already Added!**\nThis email is already in your account list.", parse_mode="Markdown")
                 return
         
-        # Add new account
         user_db[m.chat.id]['accounts'].append({'email': email, 'pass': password})
+        save_user(m.chat.id)
         
         if test_account_credentials(email, password):
             bot.send_message(m.chat.id, "✅ **Added + Working!**", parse_mode="Markdown")
@@ -298,19 +315,21 @@ def save_acc(m):
             
     except Exception as e:
         bot.send_message(m.chat.id, "❌ **Wrong Format!**\nUse: `email:password`", parse_mode="Markdown")
-        print(f"Save acc error: {e}")
 
 def save_target(m):
     user_db[m.chat.id]['target'] = m.text.strip()
+    save_user(m.chat.id)
     bot.send_message(m.chat.id, "✅ Target saved!")
 
 def save_subj(m):
     user_db[m.chat.id]['subj'] = m.text.strip()
+    save_user(m.chat.id)
     msg = bot.send_message(m.chat.id, "📝 **Body/Content:**")
     bot.register_next_step_handler(msg, save_body)
 
 def save_body(m):
     user_db[m.chat.id]['body'] = m.text.strip()
+    save_user(m.chat.id)
     bot.send_message(m.chat.id, "✅ Message saved!")
 
 def final_launch(m):
@@ -321,6 +340,7 @@ def final_launch(m):
         if not d['accounts'] or not d['target']:
             return bot.send_message(cid, "❌ Add accounts and target first!")
         d['running'] = True
+        save_user(cid)
         threading.Thread(target=mass_mailer_engine, args=(cid, d['target'], d['subj'], d['body'], limit)).start()
     except:
         bot.send_message(m.chat.id, "❌ Enter number only!")
@@ -329,4 +349,5 @@ def final_launch(m):
 if __name__ == "__main__":
     print("🤖 Bot Started!")
     print(f"👑 Owner ID: {OWNER_ID}")
+    print("💾 SQLite Database Active")
     bot.infinity_polling()
